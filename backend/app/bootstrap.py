@@ -33,6 +33,24 @@ def _ensure_tables() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def _ensure_idempotent_unique_constraints() -> None:
+    """create_all 不会改既有表；对老库补齐离线同步幂等约束。
+
+    若约束已存在则跳过；执行失败时仅打印告警，不阻断启动。
+    """
+    statements = [
+        "ALTER TABLE offline_sync_logs "
+        "ADD CONSTRAINT uq_offline_sync_client_batch UNIQUE (client_id, batch_id)",
+    ]
+    with engine.begin() as conn:
+        for sql in statements:
+            try:
+                conn.exec_driver_sql(sql)
+            except Exception as exc:  # noqa: BLE001
+                # 已存在 / 旧版本 PG 语法差异等情况，不影响新库
+                print(f"[bootstrap] 跳过约束补齐：{sql} -> {exc}")
+
+
 def _ensure_parties(db: Session) -> Dict[PartyRole, Party]:
     """确保六方参与方存在。"""
     presets = [
@@ -114,6 +132,7 @@ def _ensure_projects(db: Session, parties: Dict[PartyRole, Party]) -> List[Proje
 
 def ensure_seed() -> None:
     _ensure_tables()
+    _ensure_idempotent_unique_constraints()
     with session_scope() as db:
         parties = _ensure_parties(db)
         _ensure_users(db, parties)

@@ -93,6 +93,50 @@ class ComponentOut(BaseModel):
     qr_payload: str
 
 
+class ComponentBatchItem(BaseModel):
+    """批量录入单条：同批次所有条目必须归属同一 project_id（顶层字段）。"""
+    component_type: ComponentType
+    spec: str = ""
+    quantity: int = 1
+    mould_no: str
+    rebar_batch: str
+    concrete_ratio: str
+    pour_at: datetime
+    curing_record: str = ""
+    strength_report: str = ""
+    embedded_parts: Dict[str, Any] = Field(default_factory=dict)
+    factory_inspection: AcceptanceResult = AcceptanceResult.PASSED
+
+
+class ComponentBatchCreate(BaseModel):
+    """工厂平板端批量录入请求。
+
+    client_id + batch_id 共同构成幂等键：同一批数据重发将直接复用历史结果，
+    避免因弱网重试导致追溯码被重复占用。
+    """
+    client_id: str = Field(..., min_length=1, max_length=64)
+    batch_id: str = Field(..., min_length=1, max_length=64)
+    project_id: int
+    items: List[ComponentBatchItem] = Field(..., min_length=1, max_length=500)
+
+
+class ComponentBatchItemResult(BaseModel):
+    index: int
+    component_id: int
+    trace_code: str
+    rfid_tag: str
+    qr_payload: str
+
+
+class ComponentBatchResult(BaseModel):
+    batch_id: str
+    accepted: int
+    rejected: int
+    items: List[ComponentBatchItemResult] = Field(default_factory=list)
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    idempotent_replay: bool = False  # True = 命中幂等表直接返回历史结果
+
+
 # ---------- 出厂 ----------
 class FactoryOutCreate(BaseModel):
     component_id: int

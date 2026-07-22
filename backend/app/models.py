@@ -306,6 +306,27 @@ class ProtectionRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class TraceSequence(Base):
+    """工厂 × 当日 追溯码原子序列。
+
+    多班组并发抢号根因是原先「count()+1」的 SELECT-then-INSERT 存在 TOCTOU。
+    此表在 (factory_id, seq_date) 上唯一，行级锁 (SELECT ... FOR UPDATE) 串行化
+    同一工厂同一日内的号段分配；不同工厂 / 不同日 完全并行。
+    """
+    __tablename__ = "trace_sequences"
+    __table_args__ = (
+        UniqueConstraint("factory_id", "seq_date", name="uq_trace_seq_factory_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    factory_id: Mapped[int] = mapped_column(ForeignKey("parties.id"), index=True)
+    seq_date: Mapped[datetime] = mapped_column(DateTime, index=True)  # 当日 00:00:00
+    next_value: Mapped[int] = mapped_column(Integer, default=1)       # 下一可用序号
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ArchivePackage(Base):
     """电子档案包。"""
     __tablename__ = "archive_packages"
@@ -329,11 +350,18 @@ class ArchivePackage(Base):
 # 离线同步
 # ---------------------------------------------------------------------------
 class OfflineSyncLog(Base):
-    """离线同步日志，用于排查弱网环境缓存是否成功回传。"""
+    """离线同步日志，用于排查弱网环境缓存是否成功回传。
+
+    (client_id, batch_id) 唯一约束支撑接口幂等：客户端重发同一批
+    数据时直接复用历史结果，不再重复插入。
+    """
     __tablename__ = "offline_sync_logs"
+    __table_args__ = (
+        UniqueConstraint("client_id", "batch_id", name="uq_offline_sync_client_batch"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    client_id: Mapped[str] = mapped_column(String(64), index=True)  # 终端设备标识
+    client_id: Mapped[str] = mapped_column(String(64), index=True)
     batch_id: Mapped[str] = mapped_column(String(64), index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="accepted")  # accepted/rejected
