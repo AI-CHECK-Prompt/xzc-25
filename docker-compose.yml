@@ -1,0 +1,90 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: xzc25_postgres
+    environment:
+      POSTGRES_USER: xzc25
+      POSTGRES_PASSWORD: xzc25_pwd
+      POSTGRES_DB: xzc25_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xzc25 -d xzc25_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: xzc25_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: xzc25_backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://xzc25:xzc25_pwd@postgres:5432/xzc25_db
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: xzc25-super-secret-key
+      APP_ENV: docker
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend_storage:/app/storage
+    command: >
+      sh -c "alembic upgrade head 2>/dev/null || true &&
+             python -m app.bootstrap &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: xzc25_frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_BASE: http://localhost:8000
+
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: xzc25_simulator
+    depends_on:
+      - backend
+    environment:
+      API_BASE: http://backend:8000
+    volumes:
+      - ./simulator:/app
+      - simulator_data:/app/data
+    command: ["python", "inject_data.py", "--project", "阳光城A区一标段"]
+
+volumes:
+  pg_data:
+  backend_storage:
+  simulator_data:

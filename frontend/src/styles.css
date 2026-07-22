@@ -1,0 +1,96 @@
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f5f7fa;
+  color: #303133;
+}
+
+.layout {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-header {
+  background: linear-gradient(135deg, #1d4ed8, #06b6d4);
+  color: #fff;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.layout-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.layout-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.layout-aside {
+  width: 220px;
+  background: #001529;
+  color: #fff;
+  overflow-y: auto;
+}
+
+.layout-aside .el-menu {
+  border-right: 0;
+}
+
+.layout-main {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background: #f5f7fa;
+}
+
+.card-section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+
+.timeline-card {
+  background: #fff;
+  border-left: 4px solid #1d4ed8;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border-radius: 4px;
+}
+
+.timeline-card .stage {
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.timeline-card .actor {
+  color: #606266;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+.timeline-card .summary {
+  margin-top: 6px;
+  color: #303133;
+}
+
+.offline-banner {
+  background: #fdf6ec;
+  color: #e6a23c;
+  padding: 8px 16px;
+  text-align: center;
+  border-bottom: 1px solid #faecd8;
+}
