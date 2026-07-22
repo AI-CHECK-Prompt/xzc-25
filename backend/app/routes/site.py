@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,11 +14,13 @@ from sqlalchemy.orm import Session
 from ..auth import require_roles
 from ..db import get_db
 from ..models import (
+    AcceptanceResult,
     Component,
     ConcealedAcceptance,
     HoistingRecord,
     JointConnection,
     PartyRole,
+    Project,
     ProtectionRecord,
     SiteEntryRecord,
     User,
@@ -36,6 +39,8 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api/site", tags=["现场作业"])
+
+log = logging.getLogger(__name__)
 
 
 # ---------- 进场 ----------
@@ -71,19 +76,70 @@ def eligible_components(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(PartyRole.CONTRACTOR)),
 ):
-    """返回当前项目下已进场且验收合格的、未吊装的构件。"""
+    """返回当前账号所属项目下已进场且验收合格、未吊装的构件。
+
+    修复说明：
+      原实现直接对全平台 SiteEntryRecord / HoistingRecord 取集合，未按当前
+      账号所属项目做隔离，会把其他工地的合格件一并返回，施工员扫码吊装时
+      才在 HoistingRecord 写入阶段被 cross-project 校验拒收。改为先按
+      Project.contractor_party_id 圈定本账号的项目白名单，再做合格/未吊装
+      筛选，杜绝跨工地误显示。
+    """
+    # 1) 当前账号所属项目白名单（一个施工总承包可承接多个项目）
+    project_ids = [
+        p.id
+        for p in db.query(Project.id)
+        .filter(Project.contractor_party_id == user.party_id)
+        .all()
+    ]
+    if not project_ids:
+        log.info(
+            "【现场作业-可吊装】账号无所属项目 user=%s party=%s",
+            user.username, user.party_id,
+        )
+        return []
+
+    # 2) 白名单项目下的全部构件
+    project_component_ids = {
+        c.id
+        for c in db.query(Component.id)
+        .filter(Component.project_id.in_(project_ids))
+        .all()
+    }
+    if not project_component_ids:
+        return []
+
+    # 3) 进场验收合格件（限白名单项目）
     passed_ids = {
         r.component_id
-        for r in db.query(SiteEntryRecord).filter(SiteEntryRecord.acceptance == "合格").all()
+        for r in db.query(SiteEntryRecord.component_id)
+        .filter(
+            SiteEntryRecord.acceptance == AcceptanceResult.PASSED,
+            SiteEntryRecord.component_id.in_(project_component_ids),
+        )
+        .all()
     }
-    hoisted_ids = {r.component_id for r in db.query(HoistingRecord).all()}
     if not passed_ids:
         return []
+
+    # 4) 已吊装件（仅在白名单内求差集，避免被其他工地的吊装记录污染）
+    hoisted_ids = {
+        r.component_id
+        for r in db.query(HoistingRecord.component_id)
+        .filter(HoistingRecord.component_id.in_(passed_ids))
+        .all()
+    }
+
     comps = (
         db.query(Component)
         .filter(Component.id.in_(passed_ids))
         .order_by(Component.id.desc())
         .all()
+    )
+    log.info(
+        "【现场作业-可吊装】user=%s projects=%s passed=%d hoisted=%d returned=%d",
+        user.username, project_ids, len(passed_ids), len(hoisted_ids),
+        sum(1 for c in comps if c.id not in hoisted_ids),
     )
     return [
         {
