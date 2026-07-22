@@ -10,6 +10,23 @@ const code = ref<string>((route.params.code as string) || (route.query.code as s
 const data = ref<any>(null)
 const qrImage = ref<string>('')
 
+// 告警类型 → 显示名称/颜色，与 transport/Alerts.vue 保持一致
+const ALERT_LABELS: Record<string, { label: string; type: 'danger' | 'warning' | 'info' }> = {
+  TEMP_OUT: { label: '温度越界', type: 'danger' },
+  OFF_ROUTE: { label: '偏离路线', type: 'warning' },
+  OVERSTAY: { label: '超时停留', type: 'warning' },
+}
+
+function alertStyle(alertType: string) {
+  return ALERT_LABELS[alertType] || { label: alertType, type: 'info' as const }
+}
+
+function timelineAlerts(t: any) {
+  // 仅当 extras 里携带 alerts 列表时返回；保持向后兼容（无该字段时退化为空）
+  if (!t || !t.extras || !Array.isArray(t.extras.alerts)) return []
+  return t.extras.alerts
+}
+
 async function load() {
   if (!code.value) return
   try {
@@ -69,6 +86,22 @@ onMounted(load)
           <el-tag style="margin-left:8px;" size="small">{{ t.occurred_at || '—' }}</el-tag>
         </div>
         <div class="summary">{{ t.summary }}</div>
+        <!--
+          同一遥测点可能同时存在多条不同类型的告警（如温度越界 + 偏离路线）。
+          在轨迹卡片下方以独立标签分行展示，不再与 summary 混排，
+          运营人员可一眼看清当前是哪种异常在持续。
+        -->
+        <div v-if="timelineAlerts(t).length" class="alert-list">
+          <div v-for="a in timelineAlerts(t)" :key="a.id" class="alert-row">
+            <el-tag :type="alertStyle(a.alert_type).type" size="small" effect="dark">
+              {{ alertStyle(a.alert_type).label }}
+            </el-tag>
+            <span class="alert-detail">{{ a.detail }}</span>
+            <el-tag v-if="a.resolved" type="success" size="small">已处置</el-tag>
+            <el-tag v-else type="info" size="small">未处置</el-tag>
+            <span class="alert-time">{{ a.created_at }}</span>
+          </div>
+        </div>
         <div v-if="t.extras && Object.keys(t.extras).length" style="margin-top:6px; font-size:12px; color:#909399;">
           <code>{{ JSON.stringify(t.extras) }}</code>
         </div>

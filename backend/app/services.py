@@ -121,8 +121,16 @@ def build_trace(db: Session, trace_code: str, requester: User) -> TraceResponse:
                 .order_by(TransportAlert.created_at.asc())
                 .all()
             )
+            # 按 telemetry_id 聚合：同一时刻可能同时存在多条不同类型的告警
+            # （例如温度越界 + 偏离路线），需全部独立展示，不能只取第一条
+            alerts_by_tel: Dict[int, List[TransportAlert]] = {}
+            for a in alerts:
+                alerts_by_tel.setdefault(a.telemetry_id, []).append(a)
             for idx, t in enumerate(tels):
-                alert_for_this = next((a for a in alerts if a.telemetry_id == t.id), None)
+                alerts_for_this = alerts_by_tel.get(t.id, [])
+                # 告警信息单独放到 extras，避免与轨迹 summary 同行拼接；
+                # 不同类型告警在追溯详情页以独立标签展示，运营人员可一眼区分
+                # 构件当前究竟是温度越界还是位置偏离状态
                 timeline.append(
                     TraceTimelineItem(
                         stage="运输轨迹" if idx == 0 else f"运输轨迹-{idx + 1}",
@@ -133,8 +141,20 @@ def build_trace(db: Session, trace_code: str, requester: User) -> TraceResponse:
                             f"位置 ({t.latitude:.4f}, {t.longitude:.4f})，"
                             f"温度 {t.temperature:.1f}℃ / 湿度 {t.humidity:.1f}%RH，"
                             f"状态 {t.status.value}"
-                            + (f"｜告警 {alert_for_this.alert_type} {alert_for_this.detail}" if alert_for_this else "")
                         ),
+                        extras={
+                            "telemetry_id": t.id,
+                            "alerts": [
+                                {
+                                    "id": a.id,
+                                    "alert_type": a.alert_type,
+                                    "detail": a.detail,
+                                    "resolved": a.resolved,
+                                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                                }
+                                for a in alerts_for_this
+                            ],
+                        },
                     )
                 )
 

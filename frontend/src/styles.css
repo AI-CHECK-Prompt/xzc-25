@@ -87,6 +87,33 @@ html, body, #app {
   color: #303133;
 }
 
+.timeline-card .alert-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timeline-card .alert-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #fdf6ec;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.timeline-card .alert-row .alert-detail {
+  flex: 1;
+  color: #303133;
+}
+
+.timeline-card .alert-row .alert-time {
+  color: #909399;
+  font-size: 12px;
+}
+
 .offline-banner {
   background: #fdf6ec;
   color: #e6a23c;
