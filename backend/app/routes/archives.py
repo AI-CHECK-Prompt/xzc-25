@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import List
 
 import httpx
@@ -80,7 +81,7 @@ def submit(
         "component_trace_code": db.get(Component, archive.component_id).trace_code,
         "project": db.get(Project, archive.project_id).name if db.get(Project, archive.project_id) else "",
         "submitter": user.full_name,
-        "submitted_at": archive.created_at.isoformat(),
+        "submitted_at": datetime.now().isoformat(),
         "manifest": archive.payload,
     }
 
@@ -94,7 +95,6 @@ def submit(
     else:
         resp_status = resp.status_code
 
-    from datetime import datetime
     archive.status = ArchiveStatus.SUBMITTED if ok else ArchiveStatus.REJECTED
     archive.submitted_at = datetime.now()
     db.commit()
