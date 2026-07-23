@@ -353,6 +353,35 @@ def detect_alerts(db: Session, telemetry: TransportTelemetry) -> List[TransportA
 # ---------------------------------------------------------------------------
 # 档案归档
 # ---------------------------------------------------------------------------
+def _cleanup_obsolete_archive_file(old_path: str, new_path: str) -> None:
+    """清理同一构件再次归档时遗留的旧 ZIP 文件。
+
+    - 旧路径为空 / 与新路径相同 → 跳过；
+    - 旧文件不在存储目录下 → 不动，避免误删（防御性检查）；
+    - 文件不存在 → 静默跳过（可能运维已手工清理）；
+    - 真正删除失败（权限、被占用等）→ 仅打印告警，不阻断新档案生成。
+    """
+    if not old_path or old_path == new_path:
+        return
+    try:
+        storage_dir = os.path.realpath(settings.storage_dir)
+        real_old = os.path.realpath(old_path)
+    except Exception:  # noqa: BLE001
+        return
+    # 必须位于 storage_dir 之下，避免误删配置 / 业务关键文件
+    if not (real_old == storage_dir or real_old.startswith(storage_dir + os.sep)):
+        return
+    try:
+        if os.path.isfile(real_old):
+            os.remove(real_old)
+    except FileNotFoundError:
+        # 已被其他流程清理，不算错误
+        return
+    except OSError as exc:  # noqa: BLE001
+        # 权限不足 / 文件被占用：不阻断新档案归档，但要让运维看到
+        print(f"[archives] 清理旧档案文件失败（不影响新档案生成）：{real_old} -> {exc}")
+
+
 def generate_archive(db: Session, component: Component, owner: User) -> ArchivePackage:
     """根据全链路数据生成电子档案包 ZIP，并落库。"""
     os.makedirs(settings.storage_dir, exist_ok=True)
@@ -399,6 +428,12 @@ def generate_archive(db: Session, component: Component, owner: User) -> ArchiveP
         db.query(ArchivePackage).filter(ArchivePackage.component_id == component.id).first()
     )
     if existing:
+        # 同一构件再次归档时，档案号（带时间戳）会重新生成，磁盘上会
+        # 多出一份新的 ZIP。DB 记录通过唯一约束只能保留一条，因此需要
+        # 在切换 file_path 之前先清理旧文件，否则存储目录会不断堆积
+        # 与档案号仅差时间戳后缀的「历史档案包」，长期运行后占用大量
+        # 磁盘空间且无法识别为可清理数据。
+        _cleanup_obsolete_archive_file(existing.file_path, file_path)
         existing.archive_no = archive_no
         existing.file_path = file_path
         existing.payload = manifest
