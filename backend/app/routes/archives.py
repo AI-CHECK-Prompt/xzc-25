@@ -76,10 +76,23 @@ def submit(
     if archive.status not in (ArchiveStatus.GENERATED, ArchiveStatus.REJECTED):
         raise HTTPException(status_code=409, detail=f"当前状态 {archive.status.value} 不允许重复报送")
 
+    component = db.get(Component, archive.component_id)
+    if not component:
+        raise HTTPException(
+            status_code=422,
+            detail=f"档案关联的构件（id={archive.component_id}）已被删除，无法完成报送，请联系平台管理员补录构件信息后重试",
+        )
+    project = db.get(Project, archive.project_id)
+    if not project:
+        raise HTTPException(
+            status_code=422,
+            detail=f"档案关联的项目（id={archive.project_id}）不存在或已被删除，无法完成报送",
+        )
+
     payload = {
         "archive_no": archive.archive_no,
-        "component_trace_code": db.get(Component, archive.component_id).trace_code,
-        "project": db.get(Project, archive.project_id).name if db.get(Project, archive.project_id) else "",
+        "component_trace_code": component.trace_code,
+        "project": project.name,
         "submitter": user.full_name,
         "submitted_at": datetime.now().isoformat(),
         "manifest": archive.payload,
