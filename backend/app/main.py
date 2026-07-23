@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .bootstrap import ensure_seed
 from .db import Base, engine
-from .routes import archives, auth, components, meta, site, sync, trace, transport
+from .routes import archives, auth, components, meta, quality, site, sync, trace, transport
 
 
 @asynccontextmanager
@@ -52,3 +52,4 @@ app.include_router(archives.router)
 app.include_router(trace.router)
 app.include_router(sync.router)
 app.include_router(meta.router)
+app.include_router(quality.router)

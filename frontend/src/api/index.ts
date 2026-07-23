@@ -53,3 +53,39 @@ export const archiveApi = {
 export const syncApi = {
   batch: (payload: any) => client.post('/sync/batch', payload),
 }
+
+// 质监抽检 / 整改 / 维护 / 进度
+export const qualityApi = {
+  createTask: (payload: any) => client.post('/quality/inspections/tasks', payload),
+  listTasks: (params?: any) => client.get('/quality/inspections/tasks', { params }),
+  getTask: (taskId: number) => client.get(`/quality/inspections/tasks/${taskId}`),
+  submitRecord: (payload: any) => client.post('/quality/inspections/records', payload),
+  listRecords: (params?: any) => client.get('/quality/inspections/records', { params }),
+  listRectifications: (params?: any) =>
+    client.get('/quality/rectifications', { params }),
+  submitRectification: (payload: any) => client.post('/quality/rectifications', payload),
+  resubmitRectification: (rectId: number, payload: any) =>
+    client.post(`/quality/rectifications/${rectId}/resubmit`, payload),
+}
+
+export const maintenanceApi = {
+  listChecks: (params?: any) => client.get('/maintenance/checks', { params }),
+  createCheck: (payload: any) => client.post('/maintenance/checks', payload),
+  getAdvice: (componentId: number) =>
+    client.get(`/maintenance/advice/${componentId}`),
+}
+
+export const projectApi = {
+  listMilestones: (projectId: number) =>
+    client.get(`/projects/${projectId}/milestones`),
+  createMilestone: (payload: any) => client.post('/projects/milestones', payload),
+  getProgress: (projectId: number) =>
+    client.get(`/projects/${projectId}/progress`),
+  upsertLocation: (
+    projectId: number, componentId: number, payload: any,
+  ) => client.post(
+    `/projects/${projectId}/components/${componentId}/location`,
+    null,
+    { params: payload },
+  ),
+}

@@ -37,6 +37,7 @@ from ..schemas import (
     SiteEntryCreate,
     SiteEntryOut,
 )
+from ..services import has_blocking_inspection
 
 router = APIRouter(prefix="/api/site", tags=["现场作业"])
 
@@ -175,6 +176,12 @@ def hoist(
         )
     if db.query(HoistingRecord).filter(HoistingRecord.component_id == comp.id).first():
         raise HTTPException(status_code=409, detail="该构件已吊装，禁止重复登记")
+    # 质监抽检阻断：未闭环的不合格抽检禁止进入下游工序
+    if has_blocking_inspection(db, comp.id, "已吊装"):
+        raise HTTPException(
+            status_code=409,
+            detail="存在未闭环的不合格抽检记录，请先完成整改并由原抽检人复核",
+        )
 
     rec = HoistingRecord(
         component_id=comp.id,
@@ -206,6 +213,11 @@ def joint(
         raise HTTPException(status_code=404, detail="构件不存在")
     if not db.query(HoistingRecord).filter(HoistingRecord.component_id == comp.id).first():
         raise HTTPException(status_code=400, detail="构件未吊装，不能登记节点连接")
+    if has_blocking_inspection(db, comp.id, "节点连接"):
+        raise HTTPException(
+            status_code=409,
+            detail="存在未闭环的不合格抽检记录，请先完成整改并由原抽检人复核",
+        )
     rec = JointConnection(
         component_id=comp.id,
         contractor_id=user.party_id,
@@ -235,6 +247,11 @@ def concealed(
         raise HTTPException(status_code=404, detail="构件不存在")
     if not db.query(JointConnection).filter(JointConnection.component_id == comp.id).first():
         raise HTTPException(status_code=400, detail="尚未完成节点连接，不能隐蔽验收")
+    if has_blocking_inspection(db, comp.id, "已隐蔽"):
+        raise HTTPException(
+            status_code=409,
+            detail="存在未闭环的不合格抽检记录，请先完成整改并由原抽检人复核",
+        )
     rec = ConcealedAcceptance(
         component_id=comp.id,
         supervisor_id=user.party_id,
@@ -264,6 +281,11 @@ def protection(
         raise HTTPException(status_code=404, detail="构件不存在")
     if not db.query(ConcealedAcceptance).filter(ConcealedAcceptance.component_id == comp.id).first():
         raise HTTPException(status_code=400, detail="尚未完成隐蔽验收，不能登记成品保护")
+    if has_blocking_inspection(db, comp.id, "成品保护"):
+        raise HTTPException(
+            status_code=409,
+            detail="存在未闭环的不合格抽检记录，请先完成整改并由原抽检人复核",
+        )
 
     risk_warning = ""
     if any(k in body.mep.lower() for k in ["电", "焊", "切割"]) and "防火" not in body.measures:

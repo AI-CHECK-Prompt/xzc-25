@@ -190,3 +190,111 @@ CREATE INDEX IF NOT EXISTS idx_components_stage ON components(current_stage);
 CREATE INDEX IF NOT EXISTS idx_telemetry_reported ON transport_telemetry(reported_at);
 CREATE INDEX IF NOT EXISTS idx_alerts_component ON transport_alerts(component_id);
 CREATE INDEX IF NOT EXISTS idx_archive_status ON archive_packages(status);
+
+-- 质监抽检 / 整改 / 维护 / 项目进度
+CREATE TABLE IF NOT EXISTS quality_inspection_tasks (
+    id SERIAL PRIMARY KEY,
+    task_no VARCHAR(64) UNIQUE NOT NULL,
+    component_id INTEGER REFERENCES components(id),
+    project_id INTEGER REFERENCES projects(id),
+    quality_party_id INTEGER REFERENCES parties(id),
+    initiated_by INTEGER REFERENCES users(id),
+    inspector_user_id INTEGER REFERENCES users(id),
+    stage VARCHAR(32) NOT NULL,
+    title VARCHAR(128) DEFAULT '',
+    requirement TEXT DEFAULT '',
+    planned_at TIMESTAMP,
+    open_token VARCHAR(64) DEFAULT 'open',
+    is_closed BOOLEAN DEFAULT FALSE,
+    closed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(component_id, stage, open_token)
+);
+CREATE INDEX IF NOT EXISTS idx_qitask_component ON quality_inspection_tasks(component_id);
+CREATE INDEX IF NOT EXISTS idx_qitask_project ON quality_inspection_tasks(project_id);
+CREATE INDEX IF NOT EXISTS idx_qitask_open ON quality_inspection_tasks(is_closed);
+
+CREATE TABLE IF NOT EXISTS quality_inspection_records (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES quality_inspection_tasks(id),
+    component_id INTEGER REFERENCES components(id),
+    inspector_user_id INTEGER REFERENCES users(id),
+    sequence INTEGER DEFAULT 1,
+    inspected_at TIMESTAMP NOT NULL,
+    location VARCHAR(128) DEFAULT '',
+    conclusion VARCHAR(16) NOT NULL,
+    findings TEXT DEFAULT '',
+    measures TEXT DEFAULT '',
+    photo_urls JSON DEFAULT '[]'::jsonb,
+    is_reinspection BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_qirec_task ON quality_inspection_records(task_id);
+CREATE INDEX IF NOT EXISTS idx_qirec_time ON quality_inspection_records(inspected_at);
+
+CREATE TABLE IF NOT EXISTS rectification_records (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES quality_inspection_tasks(id),
+    component_id INTEGER REFERENCES components(id),
+    contractor_party_id INTEGER REFERENCES parties(id),
+    round INTEGER DEFAULT 1,
+    status VARCHAR(16) DEFAULT '待整改',
+    plan TEXT DEFAULT '',
+    progress_note TEXT DEFAULT '',
+    result_note TEXT DEFAULT '',
+    photo_urls JSON DEFAULT '[]'::jsonb,
+    deadline TIMESTAMP,
+    submitted_at TIMESTAMP,
+    closed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, round)
+);
+CREATE INDEX IF NOT EXISTS idx_rect_component ON rectification_records(component_id);
+CREATE INDEX IF NOT EXISTS idx_rect_status ON rectification_records(status);
+
+CREATE TABLE IF NOT EXISTS maintenance_check_records (
+    id SERIAL PRIMARY KEY,
+    component_id INTEGER REFERENCES components(id),
+    project_id INTEGER REFERENCES projects(id),
+    operator_party_id INTEGER REFERENCES parties(id),
+    operator_user_id INTEGER REFERENCES users(id),
+    checked_at TIMESTAMP NOT NULL,
+    finding VARCHAR(16) NOT NULL,
+    description TEXT DEFAULT '',
+    action_taken TEXT DEFAULT '',
+    next_check_in_days INTEGER DEFAULT 0,
+    photo_urls JSON DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_maint_component ON maintenance_check_records(component_id);
+CREATE INDEX IF NOT EXISTS idx_maint_time ON maintenance_check_records(checked_at);
+
+CREATE TABLE IF NOT EXISTS project_milestones (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES projects(id),
+    code VARCHAR(32) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    stage VARCHAR(32) DEFAULT '已生产',
+    planned_at TIMESTAMP,
+    baseline_at TIMESTAMP,
+    weight DOUBLE PRECISION DEFAULT 1.0,
+    sort_no INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, code)
+);
+CREATE INDEX IF NOT EXISTS idx_milestone_project ON project_milestones(project_id);
+
+CREATE TABLE IF NOT EXISTS component_locations (
+    id SERIAL PRIMARY KEY,
+    component_id INTEGER REFERENCES components(id),
+    project_id INTEGER REFERENCES projects(id),
+    longitude DOUBLE PRECISION NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    building VARCHAR(64) DEFAULT '',
+    floor VARCHAR(32) DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(component_id)
+);
+CREATE INDEX IF NOT EXISTS idx_loc_project ON component_locations(project_id);

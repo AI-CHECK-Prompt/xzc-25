@@ -12,7 +12,11 @@ from .models import (
     ComponentType,
     ConnectionType,
     HoistResult,
+    InspectionConclusion,
+    MaintenanceFinding,
     PartyRole,
+    ProjectNodeStatus,
+    RectificationStatus,
     TransportStatus,
 )
 
@@ -354,3 +358,198 @@ class TraceResponse(BaseModel):
 
 
 TokenOut.model_rebuild()
+
+
+# ---------- 质监抽检 ----------
+class InspectionTaskCreate(BaseModel):
+    component_id: int
+    stage: str  # 当前工序：已生产 / 出厂 / 已进场 / 已吊装 / 节点连接 / 已隐蔽 / 成品保护
+    title: str = ""
+    requirement: str = ""
+    planned_at: Optional[datetime] = None
+    inspector_user_id: Optional[int] = None  # 复核人：原抽检人
+
+
+class InspectionTaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_no: str
+    component_id: int
+    project_id: int
+    quality_party_id: int
+    initiated_by: int
+    inspector_user_id: Optional[int]
+    stage: str
+    title: str
+    requirement: str
+    planned_at: Optional[datetime]
+    is_closed: bool
+    closed_at: Optional[datetime]
+    open_token: str
+    created_at: datetime
+
+
+class InspectionRecordCreate(BaseModel):
+    task_id: int
+    inspected_at: datetime
+    location: str = ""
+    conclusion: InspectionConclusion
+    findings: str = ""
+    measures: str = ""
+    photo_urls: List[str] = Field(default_factory=list)
+    is_reinspection: bool = False
+
+
+class InspectionRecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    component_id: int
+    inspector_user_id: int
+    sequence: int
+    inspected_at: datetime
+    location: str
+    conclusion: InspectionConclusion
+    findings: str
+    measures: str
+    photo_urls: List[str]
+    is_reinspection: bool
+    created_at: datetime
+
+
+# ---------- 整改 ----------
+class RectificationCreate(BaseModel):
+    """施工方提交整改方案 / 整改过程。"""
+    task_id: int
+    plan: str = ""
+    progress_note: str = ""
+    photo_urls: List[str] = Field(default_factory=list)
+    deadline: Optional[datetime] = None
+
+
+class RectificationResubmit(BaseModel):
+    """施工方申请复核。"""
+    result_note: str = ""
+
+
+class RectificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    component_id: int
+    contractor_party_id: int
+    round: int
+    status: RectificationStatus
+    plan: str
+    progress_note: str
+    result_note: str
+    photo_urls: List[str]
+    deadline: Optional[datetime]
+    submitted_at: Optional[datetime]
+    closed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- 维护 ----------
+class MaintenanceCheckCreate(BaseModel):
+    component_id: int
+    checked_at: datetime
+    finding: MaintenanceFinding
+    description: str = ""
+    action_taken: str = ""
+    next_check_in_days: int = 0
+    photo_urls: List[str] = Field(default_factory=list)
+
+
+class MaintenanceCheckOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    component_id: int
+    project_id: int
+    operator_party_id: int
+    operator_user_id: int
+    checked_at: datetime
+    finding: MaintenanceFinding
+    description: str
+    action_taken: str
+    next_check_in_days: int
+    photo_urls: List[str]
+    created_at: datetime
+
+
+class MaintenanceAdvice(BaseModel):
+    """维护周期建议：根据构件规格 + 施工部位 + 维护历史输出。"""
+    component_id: int
+    current_finding: Optional[MaintenanceFinding] = None
+    suggested_cycle_days: int
+    next_check_at: Optional[datetime]
+    rationale: str
+    risk_level: str  # low / medium / high
+
+
+# ---------- 项目进度可视化 ----------
+class MilestoneCreate(BaseModel):
+    project_id: int
+    code: str
+    name: str
+    stage: str = "已生产"
+    planned_at: Optional[datetime] = None
+    baseline_at: Optional[datetime] = None
+    weight: float = 1.0
+    sort_no: int = 0
+
+
+class MilestoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    code: str
+    name: str
+    stage: str
+    planned_at: Optional[datetime]
+    baseline_at: Optional[datetime]
+    weight: float
+    sort_no: int
+
+
+class MilestoneProgress(BaseModel):
+    milestone: MilestoneOut
+    status: ProjectNodeStatus
+    actual_at: Optional[datetime] = None
+    progress_pct: float = 0.0
+    blocked_components: int = 0
+
+
+class ComponentLocationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    component_id: int
+    project_id: int
+    longitude: float
+    latitude: float
+    building: str
+    floor: str
+    updated_at: datetime
+
+
+class ProjectProgressView(BaseModel):
+    """三视图共享的进度数据源。
+
+    视图层：甘特图取 milestones；看板取 stage_buckets；地图取 locations。
+    """
+    project_id: int
+    project_name: str
+    overall_pct: float
+    stage_buckets: Dict[str, int]
+    blocked_components: int
+    rect_open: int
+    inspection_open: int
+    milestones: List[MilestoneProgress]
+    locations: List[ComponentLocationOut]

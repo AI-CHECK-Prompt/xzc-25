@@ -22,6 +22,7 @@ from .models import (
     Party,
     PartyRole,
     Project,
+    ProjectMilestone,
     ProtectionRecord,
     SiteEntryRecord,
     User,
@@ -81,6 +82,7 @@ def _ensure_users(db: Session, parties: Dict[PartyRole, Party]) -> None:
         ("supervisor01", "刘总监", PartyRole.SUPERVISOR),
         ("owner01", "赵主管", PartyRole.OWNER),
         ("quality01", "周监督员", PartyRole.QUALITY),
+        ("quality02", "李监督员", PartyRole.QUALITY),  # 第二抽检员，演练轮岗复核
     ]
     for username, full_name, role in presets:
         u = db.query(User).filter(User.username == username).first()
@@ -136,5 +138,33 @@ def ensure_seed() -> None:
     with session_scope() as db:
         parties = _ensure_parties(db)
         _ensure_users(db, parties)
-        _ensure_projects(db, parties)
+        projects = _ensure_projects(db, parties)
+        _ensure_default_milestones(db, projects)
         db.commit()
+
+
+def _ensure_default_milestones(db: Session, projects: List[Project]) -> None:
+    """每个项目内置 5 个关键节点，构成甘特图骨架。"""
+    stages = [
+        ("P1", "生产完成", "成品保护", 0),
+        ("P2", "运输完成", "已卸货", 1),
+        ("P3", "进场完成", "已进场", 2),
+        ("P4", "吊装完成", "已吊装", 3),
+        ("P5", "档案归档", "已归档", 4),
+    ]
+    for p in projects:
+        for code, name, stage, sort_no in stages:
+            exists = (
+                db.query(ProjectMilestone)
+                .filter(ProjectMilestone.project_id == p.id, ProjectMilestone.code == code)
+                .first()
+            )
+            if not exists:
+                db.add(ProjectMilestone(
+                    project_id=p.id,
+                    code=code,
+                    name=name,
+                    stage=stage,
+                    weight=1.0,
+                    sort_no=sort_no,
+                ))

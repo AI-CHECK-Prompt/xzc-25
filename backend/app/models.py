@@ -93,6 +93,37 @@ class ArchiveStatus(str, enum.Enum):
     REJECTED = "退回整改"
 
 
+class InspectionConclusion(str, enum.Enum):
+    """质监抽检结论。"""
+    PASSED = "合格"
+    UNPASSED = "不合格"
+    RECTIFIED = "整改后合格"
+
+
+class RectificationStatus(str, enum.Enum):
+    """整改任务状态。"""
+    PENDING = "待整改"
+    IN_PROGRESS = "整改中"
+    RESUBMITTED = "已申请复核"
+    CLOSED = "已闭环"
+
+
+class MaintenanceFinding(str, enum.Enum):
+    """维护检查发现。"""
+    NORMAL = "正常"
+    MINOR = "轻微异常"
+    MAJOR = "严重异常"
+
+
+class ProjectNodeStatus(str, enum.Enum):
+    """项目节点达成状态。"""
+    PENDING = "未启动"
+    ON_TRACK = "进行中"
+    ACHIEVED = "已达成"
+    DELAYED = "延期"
+    BLOCKED = "被阻断"
+
+
 # ---------------------------------------------------------------------------
 # 基础表
 # ---------------------------------------------------------------------------
@@ -366,3 +397,188 @@ class OfflineSyncLog(Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="accepted")  # accepted/rejected
     received_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# 质监抽检
+# ---------------------------------------------------------------------------
+class QualityInspectionTask(Base):
+    """质监抽检任务：质监机构在工作台发起，关联到具体构件与工序。
+
+    一个构件同一工序上可发起多个抽检任务（整改后再抽），但同一时间
+    同一构件同一工序只能存在一个未闭环的抽检任务。
+    """
+    __tablename__ = "quality_inspection_tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "component_id", "stage", "open_token",
+            name="uq_quality_task_component_stage_token",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_no: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    component_id: Mapped[int] = mapped_column(ForeignKey("components.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    quality_party_id: Mapped[int] = mapped_column(ForeignKey("parties.id"), index=True)
+    initiated_by: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    inspector_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )  # 复核人：原抽检人
+
+    # 抽检对象
+    stage: Mapped[str] = mapped_column(String(32), index=True)  # 当前施工工序
+    title: Mapped[str] = mapped_column(String(128), default="")
+    requirement: Mapped[str] = mapped_column(Text, default="")
+    planned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # 状态：open / closed
+    open_token: Mapped[str] = mapped_column(String(64), default="open")
+    is_closed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class QualityInspectionRecord(Base):
+    """质监抽检结果：现场录入后实时回传平台。
+
+    同一任务允许追加多条（初次抽检不合格 → 整改 → 复核合格），
+    最新一条结论作为构件在当前工序下的最终结论。
+    """
+    __tablename__ = "quality_inspection_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("quality_inspection_tasks.id"), index=True
+    )
+    component_id: Mapped[int] = mapped_column(ForeignKey("components.id"), index=True)
+    inspector_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, default=1)  # 第几次抽检
+
+    inspected_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    location: Mapped[str] = mapped_column(String(128), default="")
+    conclusion: Mapped[InspectionConclusion] = mapped_column(Enum(InspectionConclusion))
+    findings: Mapped[str] = mapped_column(Text, default="")
+    measures: Mapped[str] = mapped_column(Text, default="")
+    photo_urls: Mapped[list] = mapped_column(JSON, default=list)
+    is_reinspection: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class RectificationRecord(Base):
+    """不合格构件的整改记录。
+
+    整改流程：
+      1) 抽检不合格 → 自动开整改（status=待整改）
+      2) 责任方（施工总承包）提交整改过程与材料 → status=整改中
+      3) 整改完成 → status=已申请复核
+      4) 原抽检人复核（结论合格）→ status=已闭环；任务关闭，构件解除阻断
+    """
+    __tablename__ = "rectification_records"
+    __table_args__ = (
+        UniqueConstraint("task_id", "round", name="uq_rectification_task_round"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("quality_inspection_tasks.id"), index=True
+    )
+    component_id: Mapped[int] = mapped_column(ForeignKey("components.id"), index=True)
+    contractor_party_id: Mapped[int] = mapped_column(ForeignKey("parties.id"), index=True)
+    round: Mapped[int] = mapped_column(Integer, default=1)
+
+    status: Mapped[RectificationStatus] = mapped_column(
+        Enum(RectificationStatus), default=RectificationStatus.PENDING, index=True
+    )
+    plan: Mapped[str] = mapped_column(Text, default="")           # 整改方案
+    progress_note: Mapped[str] = mapped_column(Text, default="")  # 整改过程
+    result_note: Mapped[str] = mapped_column(Text, default="")    # 自评结果
+    photo_urls: Mapped[list] = mapped_column(JSON, default=list)
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# 构件维护周期（运营期）
+# ---------------------------------------------------------------------------
+class MaintenanceCheckRecord(Base):
+    """运营方对已归档构件的维护检查记录。
+
+    构件完成档案归档后进入运营期，运营方可登记每次维护检查。
+    平台根据：构件规格、施工部位、维护历史，自动输出维护周期建议。
+    """
+    __tablename__ = "maintenance_check_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    component_id: Mapped[int] = mapped_column(ForeignKey("components.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    operator_party_id: Mapped[int] = mapped_column(ForeignKey("parties.id"), index=True)
+    operator_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+    checked_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    finding: Mapped[MaintenanceFinding] = mapped_column(Enum(MaintenanceFinding))
+    description: Mapped[str] = mapped_column(Text, default="")
+    action_taken: Mapped[str] = mapped_column(Text, default="")
+    next_check_in_days: Mapped[int] = mapped_column(Integer, default=0)  # 0 = 平台建议
+    photo_urls: Mapped[list] = mapped_column(JSON, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# 项目进度可视化
+# ---------------------------------------------------------------------------
+class ProjectMilestone(Base):
+    """项目关键节点：开工 / 各工序完成比例 / 整体验收。
+
+    节点定义可由建设单位维护，平台按构件状态自动判定达成情况，
+    形成甘特图 / 看板 / 地图视图共享的进度数据源。
+    """
+    __tablename__ = "project_milestones"
+    __table_args__ = (
+        UniqueConstraint("project_id", "code", name="uq_milestone_project_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    code: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    stage: Mapped[str] = mapped_column(String(32), default="已生产")
+    planned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    baseline_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    sort_no: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ComponentLocation(Base):
+    """构件在工地上的实际坐标：用于地图视图渲染。
+
+    吊装完成时自动写入；运营期维护时也可由运营方更新。
+    """
+    __tablename__ = "component_locations"
+    __table_args__ = (
+        UniqueConstraint("component_id", name="uq_location_component"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    component_id: Mapped[int] = mapped_column(ForeignKey("components.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    longitude: Mapped[float] = mapped_column(Float)
+    latitude: Mapped[float] = mapped_column(Float)
+    building: Mapped[str] = mapped_column(String(64), default="")
+    floor: Mapped[str] = mapped_column(String(32), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
